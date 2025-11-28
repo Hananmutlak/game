@@ -1,59 +1,19 @@
-const Game = require('../models/Game');
-
-// التحقق من صحة البيانات
-const validateGame = (gameData, isUpdate = false) => {
-  const errors = [];
-
-  if (!isUpdate || gameData.title !== undefined) {
-    if (!gameData.title || typeof gameData.title !== 'string' || gameData.title.length > 255) {
-      errors.push('Title is required and must be a string (max 255 characters)');
-    }
-  }
-
-  if (!isUpdate || gameData.platform !== undefined) {
-    if (!gameData.platform || typeof gameData.platform !== 'string' || gameData.platform.length > 100) {
-      errors.push('Platform is required and must be a string (max 100 characters)');
-    }
-  }
-
-  if (!isUpdate || gameData.release_year !== undefined) {
-    const currentYear = new Date().getFullYear();
-    if (!gameData.release_year || 
-        typeof gameData.release_year !== 'number' || 
-        gameData.release_year < 1950 || 
-        gameData.release_year > currentYear + 2) {
-      errors.push(`Release year must be a number between 1950 and ${currentYear + 2}`);
-    }
-  }
-
-  if (!isUpdate || gameData.price !== undefined) {
-    if (!gameData.price || typeof gameData.price !== 'number' || gameData.price < 0) {
-      errors.push('Price is required and must be a positive number');
-    }
-  }
-
-  if (gameData.completed !== undefined && typeof gameData.completed !== 'boolean') {
-    errors.push('Completed must be a boolean value');
-  }
-
-  if (gameData.playtime_hours !== undefined && 
-      (typeof gameData.playtime_hours !== 'number' || gameData.playtime_hours < 0)) {
-    errors.push('Playtime hours must be a positive number');
-  }
-
-  return errors;
-};
+const { Game } = require('../models');
 
 // الحصول على جميع الألعاب
-exports.getAllGames = (req, res) => {
+exports.getAllGames = async (req, res) => {
   try {
-    const games = Game.findAll();
+    const games = await Game.findAll({
+      order: [['createdAt', 'DESC']]
+    });
+    
     res.json({
       success: true,
       data: games,
       count: games.length
     });
   } catch (error) {
+    console.error('Get all games error:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to retrieve games',
@@ -63,9 +23,9 @@ exports.getAllGames = (req, res) => {
 };
 
 // الحصول على لعبة محددة
-exports.getGameById = (req, res) => {
+exports.getGameById = async (req, res) => {
   try {
-    const game = Game.findById(req.params.id);
+    const game = await Game.findByPk(req.params.id);
     
     if (!game) {
       return res.status(404).json({
@@ -79,6 +39,7 @@ exports.getGameById = (req, res) => {
       data: game
     });
   } catch (error) {
+    console.error('Get game by ID error:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to retrieve game',
@@ -88,26 +49,43 @@ exports.getGameById = (req, res) => {
 };
 
 // إنشاء لعبة جديدة
-exports.createGame = (req, res) => {
+exports.createGame = async (req, res) => {
   try {
-    const validationErrors = validateGame(req.body);
-    
-    if (validationErrors.length > 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Validation failed',
-        errors: validationErrors
-      });
-    }
+    const { title, platform, release_year, price, completed = false, playtime_hours = 0 } = req.body;
 
-    const newGame = Game.create(req.body);
+    const game = await Game.create({
+      title,
+      platform,
+      release_year,
+      price,
+      completed,
+      playtime_hours
+    });
 
     res.status(201).json({
       success: true,
       message: 'Game created successfully',
-      data: newGame
+      data: game
     });
   } catch (error) {
+    console.error('Create game error:', error);
+    
+    if (error.name === 'SequelizeValidationError') {
+      return res.status(400).json({
+        success: false,
+        message: 'Validation failed',
+        errors: error.errors.map(err => err.message)
+      });
+    }
+
+    if (error.name === 'SequelizeUniqueConstraintError') {
+      return res.status(400).json({
+        success: false,
+        message: 'Game already exists',
+        errors: error.errors.map(err => err.message)
+      });
+    }
+
     res.status(500).json({
       success: false,
       message: 'Failed to create game',
@@ -117,9 +95,9 @@ exports.createGame = (req, res) => {
 };
 
 // تحديث لعبة
-exports.updateGame = (req, res) => {
+exports.updateGame = async (req, res) => {
   try {
-    const game = Game.findById(req.params.id);
+    const game = await Game.findByPk(req.params.id);
     
     if (!game) {
       return res.status(404).json({
@@ -128,24 +106,24 @@ exports.updateGame = (req, res) => {
       });
     }
 
-    const validationErrors = validateGame(req.body, true);
-    
-    if (validationErrors.length > 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Validation failed',
-        errors: validationErrors
-      });
-    }
-
-    const updatedGame = Game.update(req.params.id, req.body);
+    await game.update(req.body);
 
     res.json({
       success: true,
       message: 'Game updated successfully',
-      data: updatedGame
+      data: game
     });
   } catch (error) {
+    console.error('Update game error:', error);
+    
+    if (error.name === 'SequelizeValidationError') {
+      return res.status(400).json({
+        success: false,
+        message: 'Validation failed',
+        errors: error.errors.map(err => err.message)
+      });
+    }
+
     res.status(500).json({
       success: false,
       message: 'Failed to update game',
@@ -155,9 +133,9 @@ exports.updateGame = (req, res) => {
 };
 
 // حذف لعبة
-exports.deleteGame = (req, res) => {
+exports.deleteGame = async (req, res) => {
   try {
-    const game = Game.findById(req.params.id);
+    const game = await Game.findByPk(req.params.id);
     
     if (!game) {
       return res.status(404).json({
@@ -166,20 +144,14 @@ exports.deleteGame = (req, res) => {
       });
     }
 
-    const deleted = Game.delete(req.params.id);
+    await game.destroy();
 
-    if (deleted) {
-      res.json({
-        success: true,
-        message: 'Game deleted successfully'
-      });
-    } else {
-      res.status(500).json({
-        success: false,
-        message: 'Failed to delete game'
-      });
-    }
+    res.json({
+      success: true,
+      message: 'Game deleted successfully'
+    });
   } catch (error) {
+    console.error('Delete game error:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to delete game',
