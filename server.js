@@ -1,3 +1,4 @@
+require('dotenv').config();
 const fastify = require('fastify')({ 
   logger: true 
 });
@@ -5,7 +6,8 @@ const cors = require('@fastify/cors');
 const sensible = require('@fastify/sensible');
 
 // Import database and models
-const { initializeDatabase, Game } = require('./models');
+const connectDB = require('./config/database');
+const { Game } = require('./models');
 
 // Register plugins
 fastify.register(cors);
@@ -14,7 +16,7 @@ fastify.register(sensible);
 // Root route - GET /api
 fastify.get('/api', async (request, reply) => {
   return {
-    message: '🎮 Game Collection API with Fastify',
+    message: '🎮 Game Collection API with Fastify & MongoDB',
     version: '1.0.0',
     endpoints: {
       health: 'GET /api/health',
@@ -31,12 +33,11 @@ fastify.get('/api', async (request, reply) => {
 // Health check route
 fastify.get('/api/health', async (request, reply) => {
   try {
-    const gameCount = await Game.count();
+    const gameCount = await Game.countDocuments();
     return {
       status: 'OK',
-      message: 'Game Collection API with Fastify is running',
-      framework: 'Fastify',
-      database: 'SQLite',
+      message: 'Game Collection API is running',
+      database: 'MongoDB Atlas',
       total_games: gameCount,
       timestamp: new Date().toISOString()
     };
@@ -48,9 +49,7 @@ fastify.get('/api/health', async (request, reply) => {
 // GET all games
 fastify.get('/api/games', async (request, reply) => {
   try {
-    const games = await Game.findAll({
-      order: [['createdAt', 'DESC']]
-    });
+    const games = await Game.find().sort({ createdAt: -1 });
     
     return {
       success: true,
@@ -65,7 +64,7 @@ fastify.get('/api/games', async (request, reply) => {
 // GET game by ID
 fastify.get('/api/games/:id', async (request, reply) => {
   try {
-    const game = await Game.findByPk(request.params.id);
+    const game = await Game.findById(request.params.id);
     
     if (!game) {
       return reply.notFound('Game not found');
@@ -81,22 +80,7 @@ fastify.get('/api/games/:id', async (request, reply) => {
 });
 
 // POST create new game
-fastify.post('/api/games', {
-  schema: {
-    body: {
-      type: 'object',
-      required: ['title', 'platform', 'release_year', 'price'],
-      properties: {
-        title: { type: 'string', maxLength: 255 },
-        platform: { type: 'string', maxLength: 100 },
-        release_year: { type: 'integer', minimum: 1950, maximum: new Date().getFullYear() + 2 },
-        price: { type: 'number', minimum: 0 },
-        completed: { type: 'boolean' },
-        playtime_hours: { type: 'integer', minimum: 0 }
-      }
-    }
-  }
-}, async (request, reply) => {
+fastify.post('/api/games', async (request, reply) => {
   try {
     const game = await Game.create(request.body);
     
@@ -107,37 +91,24 @@ fastify.post('/api/games', {
       data: game
     };
   } catch (error) {
-    if (error.name === 'SequelizeValidationError') {
-      return reply.badRequest('Validation failed: ' + error.errors.map(err => err.message).join(', '));
+    if (error.name === 'ValidationError') {
+      return reply.badRequest('Validation failed: ' + Object.values(error.errors).map(err => err.message).join(', '));
     }
     reply.internalServerError('Failed to create game');
   }
 });
 
 // PUT update game
-fastify.put('/api/games/:id', {
-  schema: {
-    body: {
-      type: 'object',
-      properties: {
-        title: { type: 'string', maxLength: 255 },
-        platform: { type: 'string', maxLength: 100 },
-        release_year: { type: 'integer', minimum: 1950, maximum: new Date().getFullYear() + 2 },
-        price: { type: 'number', minimum: 0 },
-        completed: { type: 'boolean' },
-        playtime_hours: { type: 'integer', minimum: 0 }
-      }
-    }
-  }
-}, async (request, reply) => {
+fastify.put('/api/games/:id', async (request, reply) => {
   try {
-    const game = await Game.findByPk(request.params.id);
+    const game = await Game.findById(request.params.id);
     
     if (!game) {
       return reply.notFound('Game not found');
     }
 
-    await game.update(request.body);
+    Object.assign(game, request.body);
+    await game.save();
 
     return {
       success: true,
@@ -145,8 +116,8 @@ fastify.put('/api/games/:id', {
       data: game
     };
   } catch (error) {
-    if (error.name === 'SequelizeValidationError') {
-      return reply.badRequest('Validation failed: ' + error.errors.map(err => err.message).join(', '));
+    if (error.name === 'ValidationError') {
+      return reply.badRequest('Validation failed: ' + Object.values(error.errors).map(err => err.message).join(', '));
     }
     reply.internalServerError('Failed to update game');
   }
@@ -155,13 +126,11 @@ fastify.put('/api/games/:id', {
 // DELETE game
 fastify.delete('/api/games/:id', async (request, reply) => {
   try {
-    const game = await Game.findByPk(request.params.id);
+    const game = await Game.findByIdAndDelete(request.params.id);
     
     if (!game) {
       return reply.notFound('Game not found');
     }
-
-    await game.destroy();
 
     return {
       success: true,
@@ -172,7 +141,7 @@ fastify.delete('/api/games/:id', async (request, reply) => {
   }
 });
 
-// 404 handler for undefined routes
+// 404 handler
 fastify.setNotFoundHandler((request, reply) => {
   reply.code(404).send({
     success: false,
@@ -192,17 +161,23 @@ fastify.setNotFoundHandler((request, reply) => {
 // Start server
 const start = async () => {
   try {
-    // Initialize database
-    await initializeDatabase();
+    // Connect to MongoDB
+    await connectDB();
     
     // Start Fastify server
-    await fastify.listen({ port: 3000, host: '0.0.0.0' });
-    console.log('🚀 Fastify server running on port 3000');
-    console.log('📚 API available at http://localhost:3000/api');
-    console.log('🗄️ Database: SQLite with Sequelize');
-    console.log('⚡ Framework: Fastify');
+    const PORT = process.env.PORT || 3000;
+    await fastify.listen({ 
+      port: PORT, 
+      host: '0.0.0.0' 
+    });
+    
+    console.log(`🚀 Server running on http://localhost:${PORT}`);
+    console.log(`📚 API: http://localhost:${PORT}/api`);
+    console.log(`🗄️ Database: MongoDB Atlas`);
+    console.log(`⚡ Framework: Fastify with Mongoose`);
+    
   } catch (err) {
-    fastify.log.error(err);
+    console.error('❌ Server error:', err);
     process.exit(1);
   }
 };
