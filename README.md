@@ -1,6 +1,6 @@
 # Game Collection API
 
-A RESTful API for managing video game collection built with **Fastify** and **MongoDB**. This API provides full CRUD operations for managing game data with data validation and error handling.
+A RESTful API for managing  game collection built with **Fastify** and **MongoDB**. This API provides full CRUD operations for managing game data with data validation and error handling.
 
 ##  Live Demo
 - **API Base URL**: [https://game-collection-api.onrender.com](https://game-collection-api.onrender.com)
