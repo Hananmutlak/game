@@ -51,17 +51,21 @@ fastify.setNotFoundHandler((request, reply) => {
   reply.code(404).send({
     success: false,
     error: 'Route not found',
-    message: `The route ${request.method} ${request.url} was not found on this server`,
-    availableRoutes: [
-      'GET /',
-      'GET /api',
-      'GET /api/health',
-      'GET /api/games',
-      'GET /api/games/:id',
-      'POST /api/games',
-      'PUT /api/games/:id',
-      'DELETE /api/games/:id'
-    ],
+    message: `The route ${request.method} ${request.url} was not found`,
+    availableEndpoints: {
+      home: 'GET /',
+      api_info: 'GET /api',
+      health_check: 'GET /api/health',
+      get_all_games: 'GET /api/games',
+      get_single_game: 'GET /api/games/:id',
+      create_game: 'POST /api/games',
+      update_game: 'PUT /api/games/:id',
+      delete_game: 'DELETE /api/games/:id'
+    },
+    example_urls: {
+      health: 'https://game-collection-api.onrender.com/api/health',
+      games: 'https://game-collection-api.onrender.com/api/games'
+    },
     timestamp: new Date().toISOString()
   });
 });
