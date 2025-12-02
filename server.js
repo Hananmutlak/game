@@ -1,3 +1,4 @@
+// server.js
 require('dotenv').config();
 const fastify = require('fastify')({ 
   logger: true 
@@ -5,148 +6,54 @@ const fastify = require('fastify')({
 const cors = require('@fastify/cors');
 const sensible = require('@fastify/sensible');
 
-// Import database and models
+// Import database
 const connectDB = require('./config/database');
-const { Game } = require('./models');
+
+// Import routes
+const gameRoutes = require('./routes/gameRoutes');
 
 // Register plugins
-fastify.register(cors);
+fastify.register(cors, {
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+  credentials: false
+});
+
 fastify.register(sensible);
 
-// Root route - GET /api
-fastify.get('/api', async (request, reply) => {
+// Register routes
+fastify.register(gameRoutes);
+
+// Root route - GET /
+fastify.get('/', async (request, reply) => {
   return {
-    message: '🎮 Game Collection API with Fastify & MongoDB',
+    success: true,
+    message: 'Welcome to Game Collection API',
     version: '1.0.0',
+    documentation: 'Visit /api for all available endpoints',
     endpoints: {
-      health: 'GET /api/health',
-      getAllGames: 'GET /api/games',
-      getGame: 'GET /api/games/:id',
-      createGame: 'POST /api/games',
-      updateGame: 'PUT /api/games/:id',
-      deleteGame: 'DELETE /api/games/:id'
+      api_info: 'GET /api',
+      health_check: 'GET /api/health',
+      get_all_games: 'GET /api/games',
+      get_single_game: 'GET /api/games/:id',
+      create_game: 'POST /api/games',
+      update_game: 'PUT /api/games/:id',
+      delete_game: 'DELETE /api/games/:id'
     },
+    status: 'running',
     timestamp: new Date().toISOString()
   };
-});
-
-// Health check route
-fastify.get('/api/health', async (request, reply) => {
-  try {
-    const gameCount = await Game.countDocuments();
-    return {
-      status: 'OK',
-      message: 'Game Collection API is running',
-      database: 'MongoDB Atlas',
-      total_games: gameCount,
-      timestamp: new Date().toISOString()
-    };
-  } catch (error) {
-    reply.internalServerError('Database connection failed');
-  }
-});
-
-// GET all games
-fastify.get('/api/games', async (request, reply) => {
-  try {
-    const games = await Game.find().sort({ createdAt: -1 });
-    
-    return {
-      success: true,
-      data: games,
-      count: games.length
-    };
-  } catch (error) {
-    reply.internalServerError('Failed to retrieve games');
-  }
-});
-
-// GET game by ID
-fastify.get('/api/games/:id', async (request, reply) => {
-  try {
-    const game = await Game.findById(request.params.id);
-    
-    if (!game) {
-      return reply.notFound('Game not found');
-    }
-
-    return {
-      success: true,
-      data: game
-    };
-  } catch (error) {
-    reply.internalServerError('Failed to retrieve game');
-  }
-});
-
-// POST create new game
-fastify.post('/api/games', async (request, reply) => {
-  try {
-    const game = await Game.create(request.body);
-    
-    reply.code(201);
-    return {
-      success: true,
-      message: 'Game created successfully',
-      data: game
-    };
-  } catch (error) {
-    if (error.name === 'ValidationError') {
-      return reply.badRequest('Validation failed: ' + Object.values(error.errors).map(err => err.message).join(', '));
-    }
-    reply.internalServerError('Failed to create game');
-  }
-});
-
-// PUT update game
-fastify.put('/api/games/:id', async (request, reply) => {
-  try {
-    const game = await Game.findById(request.params.id);
-    
-    if (!game) {
-      return reply.notFound('Game not found');
-    }
-
-    Object.assign(game, request.body);
-    await game.save();
-
-    return {
-      success: true,
-      message: 'Game updated successfully',
-      data: game
-    };
-  } catch (error) {
-    if (error.name === 'ValidationError') {
-      return reply.badRequest('Validation failed: ' + Object.values(error.errors).map(err => err.message).join(', '));
-    }
-    reply.internalServerError('Failed to update game');
-  }
-});
-
-// DELETE game
-fastify.delete('/api/games/:id', async (request, reply) => {
-  try {
-    const game = await Game.findByIdAndDelete(request.params.id);
-    
-    if (!game) {
-      return reply.notFound('Game not found');
-    }
-
-    return {
-      success: true,
-      message: 'Game deleted successfully'
-    };
-  } catch (error) {
-    reply.internalServerError('Failed to delete game');
-  }
 });
 
 // 404 handler
 fastify.setNotFoundHandler((request, reply) => {
   reply.code(404).send({
     success: false,
-    message: 'Route not found',
+    error: 'Route not found',
+    message: `The route ${request.method} ${request.url} was not found on this server`,
     availableRoutes: [
+      'GET /',
       'GET /api',
       'GET /api/health',
       'GET /api/games',
@@ -154,32 +61,124 @@ fastify.setNotFoundHandler((request, reply) => {
       'POST /api/games',
       'PUT /api/games/:id',
       'DELETE /api/games/:id'
-    ]
+    ],
+    timestamp: new Date().toISOString()
   });
 });
 
-// Start server
-const start = async () => {
+// Error handler
+fastify.setErrorHandler((error, request, reply) => {
+  const statusCode = error.statusCode || 500;
+  
+  fastify.log.error(error);
+  
+  reply.code(statusCode).send({
+    success: false,
+    error: error.name || 'Internal Server Error',
+    message: error.message || 'Something went wrong',
+    ...(process.env.NODE_ENV === 'development' && { stack: error.stack }),
+    timestamp: new Date().toISOString()
+  });
+});
+
+// Graceful shutdown
+const gracefulShutdown = async () => {
+  console.log('\nShutting down gracefully...');
+  
   try {
-    // Connect to MongoDB
-    await connectDB();
+    await fastify.close();
+    console.log('Fastify server closed');
     
-    // Start Fastify server
-    const PORT = process.env.PORT || 3000;
-    await fastify.listen({ 
-      port: PORT, 
-      host: '0.0.0.0' 
-    });
+    const mongoose = require('mongoose');
+    if (mongoose.connection.readyState === 1) {
+      await mongoose.connection.close();
+      console.log('MongoDB connection closed');
+    }
     
-    console.log(`🚀 Server running on http://localhost:${PORT}`);
-    console.log(`📚 API: http://localhost:${PORT}/api`);
-    console.log(`🗄️ Database: MongoDB Atlas`);
-    console.log(`⚡ Framework: Fastify with Mongoose`);
-    
+    console.log('Shutdown complete');
+    process.exit(0);
   } catch (err) {
-    console.error('❌ Server error:', err);
+    console.error('Error during shutdown:', err);
     process.exit(1);
   }
 };
 
-start();
+// Handle shutdown signals
+process.on('SIGINT', gracefulShutdown);
+process.on('SIGTERM', gracefulShutdown);
+process.on('SIGUSR2', gracefulShutdown);
+
+// Start server
+const start = async () => {
+  try {
+    await connectDB();
+    
+    const PORT = process.env.PORT || 3000;
+    const HOST = process.env.HOST || '0.0.0.0';
+    
+    await fastify.listen({ 
+      port: PORT, 
+      host: HOST 
+    });
+    
+    console.log('\n' + '='.repeat(60));
+    console.log('GAME COLLECTION API');
+    console.log('='.repeat(60));
+    
+    console.log('\nServer Information:');
+    console.log('   Local:      http://localhost:' + PORT);
+    console.log('   Network:    http://' + HOST + ':' + PORT);
+    
+    console.log('\nAPI Endpoints:');
+    console.log('   API Info:      http://localhost:' + PORT + '/api');
+    console.log('   Health Check:  http://localhost:' + PORT + '/api/health');
+    console.log('   Games API:     http://localhost:' + PORT + '/api/games');
+    
+    console.log('\nTechnical Details:');
+    console.log('   Database:      MongoDB Atlas');
+    console.log('   Framework:     Fastify ' + fastify.version);
+    console.log('   Environment:   ' + (process.env.NODE_ENV || 'development'));
+    
+    console.log('\n' + '-'.repeat(60));
+    
+    console.log('\nAvailable Routes:');
+    console.log('   GET     /                    - Welcome page');
+    console.log('   GET     /api                 - API information');
+    console.log('   GET     /api/health          - Health check');
+    console.log('   GET     /api/games           - Get all games');
+    console.log('   POST    /api/games           - Create new game');
+    console.log('   GET     /api/games/:id       - Get single game');
+    console.log('   PUT     /api/games/:id       - Update game');
+    console.log('   DELETE  /api/games/:id       - Delete game');
+    
+    console.log('\n' + '='.repeat(60));
+    console.log('Server is ready! Press Ctrl+C to stop.');
+    console.log('='.repeat(60) + '\n');
+    
+    console.log('Tip: Test the API with:');
+    console.log('   curl http://localhost:' + PORT + '/api/health');
+    console.log('   curl http://localhost:' + PORT + '/api/games\n');
+    
+  } catch (err) {
+    console.error('\nServer startup error:', err.message);
+    
+    if (err.code === 'EADDRINUSE') {
+      console.error('   Port ' + (process.env.PORT || 3000) + ' is already in use.');
+      console.error('   Try changing the PORT in your .env file.');
+    }
+    
+    if (err.message.includes('Mongo')) {
+      console.error('   MongoDB connection failed.');
+      console.error('   Check your MONGODB_URI in the .env file.');
+    }
+    
+    process.exit(1);
+  }
+};
+
+// Only start server if this file is run directly
+if (require.main === module) {
+  start();
+} else {
+  module.exports = fastify;
+}
